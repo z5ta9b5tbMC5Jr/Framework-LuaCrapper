@@ -1,0 +1,76 @@
+# Lua
+*.lua~
+*.luac
+
+# LuaRocks
+/lua_modules/
+*.rockspec
+
+# Logs
+logs/
+*.log
+
+# Exports e resultados
+exports/
+*.json
+*.csv
+!examples/*.json
+!examples/*.csv
+
+# Configurações locais
+config/local.conf
+config/development.conf
+config/production.conf
+*.local.conf
+
+# Cache
+cache/
+*.cache
+
+# Temporários
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Sistema operacional
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dependências
+node_modules/
+
+# Arquivos de teste gerados
+test_*.json
+test_*.csv
+cli_test.*
+basic_example_*
+
+# Arquivos de backup
+*.bak
+*.backup
+
+# Arquivos de dados sensíveis
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Diretórios de build
+build/
+dist/
+
+# Arquivos de lock
+*.lock
