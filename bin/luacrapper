@@ -1,0 +1,314 @@
+#!/usr/bin/env lua
+
+--[[
+    LuaCrapper CLI - Interface de linha de comando
+    Desenvolvido por: Bypass-dev
+    Ano: 2025
+    
+    Uso:
+        luacrapper [opções] <urls...>
+        luacrapper --file <arquivo_urls>
+        luacrapper --config <arquivo_config> <urls...>
+--]]
+
+-- Adicionar diretório src ao path
+local script_dir = arg[0]:match('(.*/)')
+if script_dir then
+    package.path = script_dir .. '../src/?.lua;' .. script_dir .. '../?.lua;' .. package.path
+else
+    package.path = 'src/?.lua;?.lua;' .. package.path
+end
+
+-- Carregar dependências
+local LuaCrapper = require('luacrapper')
+local Config = require('config.config')
+
+-- Configuração padrão da CLI
+local DEFAULT_CLI_CONFIG = {
+    output_format = 'json',
+    output_file = nil,
+    config_file = nil,
+    url_file = nil,
+    max_concurrent = 5,
+    requests_per_second = 2,
+    timeout = 10,
+    verbose = false,
+    quiet = false
+}
+
+-- Função para exibir ajuda
+local function show_help()
+    print([[
+LuaCrapper CLI - Framework de Web Scraping Distribuído
+
+USO:
+    luacrapper [opções] <urls...>
+    luacrapper --file <arquivo_urls> [opções]
+    luacrapper --config <arquivo_config> [opções] <urls...>
+
+OPÇÕES:
+    -h, --help              Exibir esta ajuda
+    -v, --verbose           Modo verboso
+    -q, --quiet             Modo silencioso
+    -c, --config FILE       Arquivo de configuração
+    -f, --file FILE         Arquivo com lista de URLs
+    -o, --output FILE       Arquivo de saída
+    -F, --format FORMAT     Formato de saída (json|csv)
+    -j, --concurrent NUM    Número de workers simultâneos
+    -r, --rate NUM          Requisições por segundo
+    -t, --timeout NUM       Timeout em segundos
+    --version               Exibir versão
+
+EXEMPLOS:
+    luacrapper https://example.com
+    luacrapper -f urls.txt -o results.json
+    luacrapper -c config.lua -F csv -o data.csv https://site1.com https://site2.com
+    luacrapper --concurrent 10 --rate 5 https://api.example.com/data
+
+FORMATOS DE SAÍDA:
+    json    Formato JSON (padrão)
+    csv     Formato CSV
+
+Para mais informações, visite: https://github.com/bypass-dev/Framework-LuaCrapper
+]])
+end
+
+-- Função para exibir versão
+local function show_version()
+    print('LuaCrapper CLI v1.0')
+    print('Desenvolvido por: Bypass-dev')
+    print('Ano: 2025')
+end
+
+-- Função para analisar argumentos
+local function parse_args(args)
+    local config = {}
+    local urls = {}
+    local i = 1
+    
+    -- Copiar configuração padrão
+    for k, v in pairs(DEFAULT_CLI_CONFIG) do
+        config[k] = v
+    end
+    
+    while i <= #args do
+        local arg = args[i]
+        
+        if arg == '-h' or arg == '--help' then
+            show_help()
+            os.exit(0)
+        elseif arg == '--version' then
+            show_version()
+            os.exit(0)
+        elseif arg == '-v' or arg == '--verbose' then
+            config.verbose = true
+        elseif arg == '-q' or arg == '--quiet' then
+            config.quiet = true
+        elseif arg == '-c' or arg == '--config' then
+            i = i + 1
+            if i <= #args then
+                config.config_file = args[i]
+            else
+                error('Opção --config requer um arquivo')
+            end
+        elseif arg == '-f' or arg == '--file' then
+            i = i + 1
+            if i <= #args then
+                config.url_file = args[i]
+            else
+                error('Opção --file requer um arquivo')
+            end
+        elseif arg == '-o' or arg == '--output' then
+            i = i + 1
+            if i <= #args then
+                config.output_file = args[i]
+            else
+                error('Opção --output requer um arquivo')
+            end
+        elseif arg == '-F' or arg == '--format' then
+            i = i + 1
+            if i <= #args then
+                local format = args[i]:lower()
+                if format == 'json' or format == 'csv' then
+                    config.output_format = format
+                else
+                    error('Formato inválido: ' .. args[i] .. ' (use json ou csv)')
+                end
+            else
+                error('Opção --format requer um formato')
+            end
+        elseif arg == '-j' or arg == '--concurrent' then
+            i = i + 1
+            if i <= #args then
+                config.max_concurrent = tonumber(args[i])
+                if not config.max_concurrent or config.max_concurrent < 1 then
+                    error('Valor inválido para --concurrent: ' .. args[i])
+                end
+            else
+                error('Opção --concurrent requer um número')
+            end
+        elseif arg == '-r' or arg == '--rate' then
+            i = i + 1
+            if i <= #args then
+                config.requests_per_second = tonumber(args[i])
+                if not config.requests_per_second or config.requests_per_second < 0.1 then
+                    error('Valor inválido para --rate: ' .. args[i])
+                end
+            else
+                error('Opção --rate requer um número')
+            end
+        elseif arg == '-t' or arg == '--timeout' then
+            i = i + 1
+            if i <= #args then
+                config.timeout = tonumber(args[i])
+                if not config.timeout or config.timeout < 1 then
+                    error('Valor inválido para --timeout: ' .. args[i])
+                end
+            else
+                error('Opção --timeout requer um número')
+            end
+        elseif arg:match('^https?://') then
+            table.insert(urls, arg)
+        elseif arg:match('^-') then
+            error('Opção desconhecida: ' .. arg)
+        else
+            table.insert(urls, arg)
+        end
+        
+        i = i + 1
+    end
+    
+    return config, urls
+end
+
+-- Função para carregar URLs de arquivo
+local function load_urls_from_file(filename)
+    local file = io.open(filename, 'r')
+    if not file then
+        error('Não foi possível abrir arquivo: ' .. filename)
+    end
+    
+    local urls = {}
+    for line in file:lines() do
+        line = line:match('^%s*(.-)%s*$') -- trim
+        if line ~= '' and not line:match('^#') then
+            table.insert(urls, line)
+        end
+    end
+    
+    file:close()
+    return urls
+end
+
+-- Função para log
+local function log(config, level, message)
+    if config.quiet then
+        return
+    end
+    
+    if level == 'verbose' and not config.verbose then
+        return
+    end
+    
+    local timestamp = os.date('%H:%M:%S')
+    print('[' .. timestamp .. '] ' .. message)
+end
+
+-- Função principal
+local function main()
+    -- Analisar argumentos
+    local config, urls = parse_args(arg)
+    
+    -- Carregar arquivo de configuração se especificado
+    local app_config
+    if config.config_file then
+        app_config = Config:new(config.config_file)
+        if not app_config.loaded then
+            error('Falha ao carregar configuração: ' .. config.config_file)
+        end
+    else
+        app_config = Config:new()
+    end
+    
+    -- Carregar URLs de arquivo se especificado
+    if config.url_file then
+        local file_urls = load_urls_from_file(config.url_file)
+        for _, url in ipairs(file_urls) do
+            table.insert(urls, url)
+        end
+    end
+    
+    -- Verificar se há URLs
+    if #urls == 0 then
+        error('Nenhuma URL especificada. Use --help para ajuda.')
+    end
+    
+    log(config, 'info', 'LuaCrapper CLI iniciado')
+    log(config, 'verbose', 'URLs para processar: ' .. #urls)
+    
+    -- Configurar scraper
+    local scraper_config = {
+        max_concurrent = config.max_concurrent,
+        requests_per_second = config.requests_per_second,
+        timeout = config.timeout
+    }
+    
+    -- Criar scraper
+    local scraper = LuaCrapper:new(scraper_config)
+    
+    -- Adicionar URLs
+    log(config, 'info', 'Adicionando ' .. #urls .. ' URLs...')
+    for i, url in ipairs(urls) do
+        scraper:add_url(url, { priority = i })
+        log(config, 'verbose', '  [' .. i .. '] ' .. url)
+    end
+    
+    -- Iniciar scraping
+    log(config, 'info', 'Iniciando scraping...')
+    scraper:start()
+    
+    -- Aguardar conclusão
+    scraper:wait()
+    
+    -- Obter estatísticas
+    local stats = scraper:get_stats()
+    log(config, 'info', 'Processamento concluído!')
+    log(config, 'info', 'Estatísticas: ' .. stats.completed_tasks .. '/' .. stats.total_tasks .. ' concluídas')
+    
+    -- Determinar arquivo de saída
+    local output_file = config.output_file
+    if not output_file then
+        local timestamp = os.date('%Y%m%d_%H%M%S')
+        output_file = 'luacrapper_' .. timestamp .. '.' .. config.output_format
+    end
+    
+    -- Exportar resultados
+    log(config, 'info', 'Exportando para ' .. config.output_format:upper() .. '...')
+    local export_result = scraper:export(config.output_format, output_file)
+    
+    if export_result.success then
+        log(config, 'info', '✓ Exportado: ' .. export_result.filename)
+        log(config, 'info', '  Registros: ' .. export_result.records)
+        log(config, 'info', '  Tamanho: ' .. export_result.size .. ' bytes')
+    else
+        error('Falha na exportação')
+    end
+    
+    log(config, 'info', 'Concluído!')
+end
+
+-- Executar se chamado diretamente
+if arg and arg[0] and arg[0]:match('luacrapper$') then
+    local success, error_msg = pcall(main)
+    if not success then
+        print('Erro: ' .. error_msg)
+        os.exit(1)
+    end
+end
+
+return {
+    main = main,
+    parse_args = parse_args,
+    show_help = show_help,
+    show_version = show_version
+}
